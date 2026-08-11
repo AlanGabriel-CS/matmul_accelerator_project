@@ -1,0 +1,20 @@
+# simulation build output
+sim_build/
+obj_dir*/
+*.vcd
+*.fst
+*.log
+results.xml
+logs/
+
+# cocotb / python
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# local tool config (not project source, machine/tool-specific)
+.claude/
+.vscode/
+
+# macOS
+.DS_Store
