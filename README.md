@@ -1,6 +1,8 @@
 # AXI-Lite Matrix Multiplier Accelerator
 
-Third project in my hardware portfolio, after the RISC-V core and the [NoC router](https://github.com/AlanGabriel-CS/noc_router_project). I scaled this one down from a systolic array to a single-core MAC-based design on purpose — the goal here is clean AXI-Lite register-interface integration, memory addressing, and control FSM design, not spatial routing across a grid. It's scoped to a solid third-year computer engineering course level and built to run entirely in simulation (Icarus/Verilator + cocotb) — no FPGA board or synthesis step.
+Third project in my hardware portfolio, after the RISC-V core and the [NoC router](https://github.com/AlanGabriel-CS/noc_router_project). I scaled this one down from a systolic array to a single-core MAC-based design on purpose — the goal here is clean AXI-Lite register-interface integration, memory addressing, and control FSM design, not spatial routing across a grid. It's scoped to a solid third-year computer engineering course level and built to run entirely in simulation (Icarus Verilog + cocotb) — no FPGA board or synthesis step.
+
+What I'm proudest of: `mac_unit` silently treated every matrix element as unsigned for most of this project's life, which means every product involving a negative operand would've been wrong — not a crash, just quietly incorrect output. A regression case built specifically to exercise negative values caught it before it ever shipped. More on that below.
 
 **Status: Week 2 complete.** `axi_lite_slave` + `scratchpad_ram` (Week 1) and `matmul_fsm` + `mac_unit` sequencing (Week 2) are implemented and passing a 5-case cocotb regression against `numpy.dot()` -- square, non-square, negative operands, K=1, and a 9x9x9 case that uses 243 of the scratchpad's 256 words. See Roadmap at the bottom for where things stand day to day.
 
@@ -25,8 +27,24 @@ A host writes matrix dimensions and scratchpad base addresses through an AXI-Lit
        +-------+-------+
                |
            mac_unit
-   (acc <= acc + a*b, one MAC/cycle)
+   (acc <= acc + a*b)
 ```
+
+<details>
+<summary>Prettier version (renders on GitHub)</summary>
+
+```mermaid
+flowchart TB
+    AXI["AXI-Lite (host / testbench)"] --> SLAVE["axi_lite_slave<br/>register map, decode, r/w channels"]
+    SLAVE --> FSM["matmul_fsm<br/>address gen, row/col/k loop"]
+    SLAVE --> RAM["scratchpad_ram x3<br/>A, B, C -- dual port, inferred"]
+    FSM --> RAM
+    FSM --> MAC["mac_unit<br/>acc <= acc + a*b"]
+    RAM --> MAC
+    MAC --> RAM
+```
+
+</details>
 
 **Register map** (word-addressed, 32-bit registers):
 
@@ -46,7 +64,33 @@ A host writes matrix dimensions and scratchpad base addresses through an AXI-Lit
 
 **Scratchpad pre-load path.** A host loads a matrix by writing `SCRATCH_SEL` + `SCRATCH_ADDR` once, then streaming values through `SCRATCH_WDATA` (the address auto-increments after each write). Reading `C` back works the same way through `SCRATCH_RDATA`. This rides on scratchpad port A, which faces the AXI-Lite side; port B faces the MAC datapath via `matmul_fsm`, so pre-load and computation use physically separate ports on the same dual-port RAM.
 
-**Datapath.** `C_ij = sum_k(A_ik * B_kj)`, computed one MAC per cycle over a shared `mac_unit` rather than an array of multipliers — that's the whole point of scoping this down from a systolic array. `matmul_fsm` is responsible for clearing the accumulator at the start of each `(i, j)` pair, feeding `k` operand pairs from the A/B scratchpads in sequence, and writing the accumulated result to C once the inner loop finishes.
+**Datapath.** `C_ij = sum_k(A_ik * B_kj)`, computed over a shared `mac_unit` rather than an array of multipliers — that's the whole point of scoping this down from a systolic array. `matmul_fsm` is responsible for clearing the accumulator at the start of each `(i, j)` pair, feeding `k` operand pairs from the A/B scratchpads in sequence, and writing the accumulated result to C once the inner loop finishes. Each `k` term costs two cycles, not one: `scratchpad_ram`'s read port is synchronous, so the FSM spends a cycle driving the address (`FETCH`) and a separate cycle consuming the now-valid data into the accumulator (`ACCUM`) rather than overlapping the two. That's a real throughput cost I'm accepting on purpose — correctness and a simple, easy-to-read FSM over squeezing out an extra 2x, matching this project's actual scope.
+
+**The signed-arithmetic bug.** This is the one I'm most pleased with catching. `mac_unit`'s `a`/`b`/`acc` were declared as plain unsigned `logic`. A width-extending cast on an unsigned value zero-extends it — so a negative 32-bit matrix element read into `a` or `b` wasn't sign-extended into the 64-bit accumulator, it was reinterpreted as a huge positive number instead. The multiply would silently produce a wildly wrong product, with no crash, no assertion, nothing to flag it — just a wrong number sitting in `C`. Every test I'd written up to that point used non-negative values, so it passed clean and looked done. It only surfaced once I deliberately wrote a regression case using negative operands (`test_matmul_negative_values`, range -8..7) specifically because "small non-negative integers only" felt like too narrow a net for something calling itself a general matrix multiplier. Fixed by declaring `a`/`b`/`acc` `signed`, so the width-extending cast sign-extends instead. Lesson: a passing test suite only proves what it actually tries to break.
+
+## Verification
+
+```
+test_matmul.py (cocotb)
+  reset_dut -- AXI-Lite handshake helpers (write/read) -- load_matrix / read_matrix
+        |
+        v
+  run_matmul_case(n, k, m, value range, seed)
+    load A, B into scratchpads --> DIMS/BASE_ADDR_* --> START
+    --> poll CTRL_STATUS for DONE --> read C back --> assert == numpy.dot(A, B)
+```
+
+**Test plan.** Five directed cases, each picked to break a specific assumption rather than just re-rolling random dice on the same shape:
+
+- `test_matmul_basic` — 4x4x4, small non-negative values. The happy path.
+- `test_matmul_non_square` — 3x5x2 (N != K != M), so a bug that only shows up when the address math can't assume symmetric dimensions has somewhere to hide.
+- `test_matmul_negative_values` — the case that actually caught the signed-arithmetic bug described above.
+- `test_matmul_k_equals_one` — the inner FETCH/ACCUM loop's boundary: exactly one iteration, straight to write-back. Off-by-one loop bounds love to hide at K=1.
+- `test_matmul_near_scratchpad_depth` — 9x9x9, 243 of the scratchpad's 256 words used across A/B/C. Address math that works fine at small offsets can still overflow or alias once addresses actually get large.
+
+**Reference model.** `numpy.dot()` on the exact same operand matrices the testbench loads into the scratchpads — an exact-match assertion on the full result matrix, not a spot-check on a few elements.
+
+**Waveforms.** `WAVES=1 make` (cocotb's built-in Icarus support) dumps `dv/sim_build/matmul_top.fst`. Wired up and confirmed to produce a valid trace, but nothing's currently broken to chase down with it.
 
 ## Repository Structure
 
@@ -87,4 +131,4 @@ make
 - [x] `mac_unit` signed-arithmetic fix: `a`/`b`/`acc` were plain unsigned `logic`, so a negative operand got zero-extended into the 64-bit accumulator instead of sign-extended, corrupting any product with a negative operand. Caught by the negative-values regression case below, fixed by declaring them `signed`.
 - [x] Broader regression: non-square (3x5x2), negative operands (-8..7), K=1, and 9x9x9 (243/256 scratchpad words) -- 5/5 passing
 - [x] FST waveform dump wired (`WAVES=1 make`, cocotb's built-in Icarus support) and verified it produces a valid trace -- nothing's currently broken to chase down, so this is capability-verified rather than an active debug session; open `dv/sim_build/matmul_top.fst` in GTKWave to look yourself
-- [ ] Repo docs cleanup + push
+- [x] Repo docs cleanup (LICENSE, verification narrative, mermaid diagram, debugging write-up) + push
