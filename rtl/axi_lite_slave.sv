@@ -103,7 +103,12 @@ module axi_lite_slave #(
     output logic                          ld_c_we,
     output logic [SCRATCH_ADDR_WIDTH-1:0] ld_c_addr,
     output logic [DATA_WIDTH-1:0]         ld_c_wdata,
-    input  logic [DATA_WIDTH-1:0]         ld_c_rdata
+    input  logic [DATA_WIDTH-1:0]         ld_c_rdata,
+
+    // completion interrupt -- level-held, same source and same W1C/new-START
+    // clear as the DONE status bit, so a host can pick either interrupt-driven
+    // or polled completion without the two ever disagreeing.
+    output logic                          irq
 );
 
     localparam int REG_CTRL_STATUS  = 0;
@@ -222,6 +227,8 @@ module axi_lite_slave #(
             done_reg <= 1'b0;
         end
     end
+
+    assign irq = done_reg;
 
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin

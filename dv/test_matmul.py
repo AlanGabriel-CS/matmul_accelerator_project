@@ -118,9 +118,13 @@ async def wait_done(dut, max_polls=2000):
 
 async def run_matmul_case(dut, n, k, m, low, high, seed):
     """Load two random n*k / k*m matrices (values in [low, high)), run the
-    accelerator, and assert the C readback matches numpy.dot() exactly."""
+    accelerator, and assert the C readback matches numpy.dot() exactly.
+    Also exercises `irq`: low before START, high the moment DONE is
+    observed, and clears on the same W1C write that clears DONE."""
     cocotb.start_soon(Clock(dut.clk, 10, unit="ns").start())
     await reset_dut(dut)
+
+    assert dut.irq.value == 0, "irq must be low before the accelerator ever runs"
 
     rng = np.random.default_rng(seed=seed)
     a = rng.integers(low, high, size=(n, k), dtype=np.int64)
@@ -139,6 +143,12 @@ async def run_matmul_case(dut, n, k, m, low, high, seed):
     await axi_lite_write(dut, CTRL_STATUS, 1 << CTRL_START_BIT)
 
     await wait_done(dut)
+    assert dut.irq.value == 1, "irq must be asserted once DONE is set"
+
+    # W1C clear of the DONE bit (bit 2) must also drop irq -- they share
+    # the same done_reg source in axi_lite_slave.sv.
+    await axi_lite_write(dut, CTRL_STATUS, 1 << STATUS_DONE_BIT)
+    assert dut.irq.value == 0, "irq must clear when DONE is W1C-cleared"
 
     result = await read_matrix(dut, SCRATCH_C, base_c, n, m)
 

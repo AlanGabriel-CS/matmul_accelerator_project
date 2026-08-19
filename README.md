@@ -8,14 +8,14 @@ What I'm proudest of: `mac_unit` silently treated every matrix element as unsign
 
 ## Overview
 
-A host writes matrix dimensions and scratchpad base addresses through an AXI-Lite register interface, sets a start bit, and the accelerator computes `C = A x B` using a single shared multiply-accumulate unit, sequenced by a control FSM that walks the row/column/inner-product loops. A done flag signals completion back through the same register interface.
+A host writes matrix dimensions and scratchpad base addresses through an AXI-Lite register interface, sets a start bit, and the accelerator computes `C = A x B` using a single shared multiply-accumulate unit, sequenced by a control FSM that walks the row/column/inner-product loops. Completion is signaled two ways at once: a `DONE` status bit for a host that wants to poll, and a level-held `irq` output for a host that wants to wait on an interrupt instead.
 
 ## Architecture
 
 ```
         AXI-Lite (host / testbench)
                |
-       axi_lite_slave
+       axi_lite_slave  --irq--> (host)
    (register map, decode, r/w channels)
                |
        +-------+-------+
@@ -36,6 +36,7 @@ A host writes matrix dimensions and scratchpad base addresses through an AXI-Lit
 ```mermaid
 flowchart TB
     AXI["AXI-Lite (host / testbench)"] --> SLAVE["axi_lite_slave<br/>register map, decode, r/w channels"]
+    SLAVE -->|irq| AXI
     SLAVE --> FSM["matmul_fsm<br/>address gen, row/col/k loop"]
     SLAVE --> RAM["scratchpad_ram x3<br/>A, B, C -- dual port, inferred"]
     FSM --> RAM
@@ -62,6 +63,8 @@ flowchart TB
 
 `BASE_ADDR_C` extends the register map by one word beyond the original 4-register plan: two base addresses alone can't independently locate three separate scratchpads, so C gets its own rather than sharing A's or B's address space.
 
+**Completion: `irq` plus `DONE`, not `DONE` alone.** The original spec called for a "completion interrupt/status flag" -- for a while this only had the status-flag half, `DONE`, polled from `CTRL_STATUS`. `irq` is a real top-level output now, wired straight to the same `done_reg` that drives the `DONE` bit, so it's level-held and clears on the exact same event (a new `START`, or a W1C write to `CTRL_STATUS` bit 2) -- a host can pick either polling or interrupt-driven completion and the two will never disagree, because there's only one underlying register.
+
 **Scratchpad pre-load path.** A host loads a matrix by writing `SCRATCH_SEL` + `SCRATCH_ADDR` once, then streaming values through `SCRATCH_WDATA` (the address auto-increments after each write). Reading `C` back works the same way through `SCRATCH_RDATA`. This rides on scratchpad port A, which faces the AXI-Lite side; port B faces the MAC datapath via `matmul_fsm`, so pre-load and computation use physically separate ports on the same dual-port RAM.
 
 **Datapath.** `C_ij = sum_k(A_ik * B_kj)`, computed over a shared `mac_unit` rather than an array of multipliers — that's the whole point of scoping this down from a systolic array. `matmul_fsm` is responsible for clearing the accumulator at the start of each `(i, j)` pair, feeding `k` operand pairs from the A/B scratchpads in sequence, and writing the accumulated result to C once the inner loop finishes. Each `k` term costs two cycles, not one: `scratchpad_ram`'s read port is synchronous, so the FSM spends a cycle driving the address (`FETCH`) and a separate cycle consuming the now-valid data into the accumulator (`ACCUM`) rather than overlapping the two. That's a real throughput cost I'm accepting on purpose — correctness and a simple, easy-to-read FSM over squeezing out an extra 2x, matching this project's actual scope.
@@ -87,6 +90,8 @@ test_matmul.py (cocotb)
 - `test_matmul_negative_values` — the case that actually caught the signed-arithmetic bug described above.
 - `test_matmul_k_equals_one` — the inner FETCH/ACCUM loop's boundary: exactly one iteration, straight to write-back. Off-by-one loop bounds love to hide at K=1.
 - `test_matmul_near_scratchpad_depth` — 9x9x9, 243 of the scratchpad's 256 words used across A/B/C. Address math that works fine at small offsets can still overflow or alias once addresses actually get large.
+
+Every case above also checks `irq`: low before `START`, high the instant `DONE` is observed, and cleared by the same W1C write that clears `DONE`.
 
 **Reference model.** `numpy.dot()` on the exact same operand matrices the testbench loads into the scratchpads — an exact-match assertion on the full result matrix, not a spot-check on a few elements.
 
@@ -132,3 +137,4 @@ make
 - [x] Broader regression: non-square (3x5x2), negative operands (-8..7), K=1, and 9x9x9 (243/256 scratchpad words) -- 5/5 passing
 - [x] FST waveform dump wired (`WAVES=1 make`, cocotb's built-in Icarus support) and verified it produces a valid trace -- nothing's currently broken to chase down, so this is capability-verified rather than an active debug session; open `dv/sim_build/matmul_top.fst` in GTKWave to look yourself
 - [x] Repo docs cleanup (LICENSE, verification narrative, mermaid diagram, debugging write-up) + push
+- [x] `irq` output: the original scope called for "completion interrupt/status flag" but only the status-flag half existed. Added a real `irq` port wired to the same `done_reg` as `DONE`, plus a regression check on every test case that it asserts on completion and clears on the W1C clear.

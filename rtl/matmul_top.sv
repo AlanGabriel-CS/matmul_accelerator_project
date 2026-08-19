@@ -32,7 +32,9 @@ module matmul_top #(
     output logic [DATA_WIDTH-1:0]   s_axi_rdata,
     output logic [1:0]              s_axi_rresp,
     output logic                    s_axi_rvalid,
-    input  logic                    s_axi_rready
+    input  logic                    s_axi_rready,
+
+    output logic                    irq
 );
 
     logic                           ctrl_start;
@@ -94,7 +96,8 @@ module matmul_top #(
         .ld_c_we       (ld_c_we),
         .ld_c_addr     (ld_c_addr),
         .ld_c_wdata    (ld_c_wdata),
-        .ld_c_rdata    (ld_c_rdata)
+        .ld_c_rdata    (ld_c_rdata),
+        .irq           (irq)
     );
 
     logic                           a_en, b_en, c_en, c_we;
