@@ -4,7 +4,7 @@ Third project in my hardware portfolio, after the RISC-V core and the [NoC route
 
 What I'm proudest of: `mac_unit` silently treated every matrix element as unsigned for most of this project's life, which means every product involving a negative operand would've been wrong — not a crash, just quietly incorrect output. A regression case built specifically to exercise negative values caught it before it ever shipped. More on that below.
 
-**Status: Week 2 complete.** `axi_lite_slave` + `scratchpad_ram` (Week 1) and `matmul_fsm` + `mac_unit` sequencing (Week 2) are implemented and passing a 5-case cocotb regression against `numpy.dot()` -- square, non-square, negative operands, K=1, and a 9x9x9 case that uses 243 of the scratchpad's 256 words. See Roadmap at the bottom for where things stand day to day.
+**Status: Complete.** `axi_lite_slave` + `scratchpad_ram`, and `matmul_fsm` + `mac_unit` sequencing, are implemented and passing a 5-case cocotb regression against `numpy.dot()` -- square, non-square, negative operands, K=1, and a 9x9x9 case that uses 243 of the scratchpad's 256 words. See Roadmap at the bottom for the full checklist.
 
 ## Overview
 
