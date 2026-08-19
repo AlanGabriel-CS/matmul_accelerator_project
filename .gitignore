@@ -11,6 +11,7 @@ logs/
 __pycache__/
 *.pyc
 .pytest_cache/
+.venv/
 
 # local tool config (not project source, machine/tool-specific)
 .claude/

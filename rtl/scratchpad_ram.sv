@@ -4,9 +4,9 @@
 // side to pre-load operands (and to read back the result), port B is
 // read/written by the MAC datapath during computation.
 //
-// Not yet implemented: read latency handling downstream (matmul_fsm needs
-// to account for the one-cycle synchronous read here). This is a Week 1
-// scaffold, not a functional memory.
+// Port B's one-cycle synchronous read latency is accounted for downstream
+// in matmul_fsm (its FETCH/ACCUM state split exists specifically for
+// this).
 
 module scratchpad_ram #(
     parameter DATA_WIDTH = 32,

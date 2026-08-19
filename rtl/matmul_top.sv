@@ -2,12 +2,9 @@
 // Top-level: AXI-Lite register interface + three scratchpad RAMs (A, B, C)
 // + MAC datapath + control FSM, wired together per the register map
 // documented in axi_lite_slave.sv.
-//
-// Not yet implemented: this instantiates and connects the Week 1 skeleton
-// modules, but none of them have real logic yet (see the TODOs in each).
 
 module matmul_top #(
-    parameter ADDR_WIDTH         = 5,   // AXI-Lite register address width
+    parameter ADDR_WIDTH         = 6,   // AXI-Lite register address width
     parameter DATA_WIDTH         = 32,
     parameter SCRATCH_DEPTH      = 256,
     parameter SCRATCH_ADDR_WIDTH = $clog2(SCRATCH_DEPTH)
@@ -43,6 +40,13 @@ module matmul_top #(
     logic [SCRATCH_ADDR_WIDTH-1:0]  base_addr_a, base_addr_b, base_addr_c;
     logic                           status_busy, status_done;
 
+    // scratchpad load/read-back port (host <-> port A of each scratchpad,
+    // via axi_lite_slave's SCRATCH_SEL/ADDR/WDATA/RDATA registers)
+    logic                           ld_a_en, ld_a_we, ld_b_en, ld_b_we, ld_c_en, ld_c_we;
+    logic [SCRATCH_ADDR_WIDTH-1:0]  ld_a_addr, ld_b_addr, ld_c_addr;
+    logic [DATA_WIDTH-1:0]          ld_a_wdata, ld_b_wdata, ld_c_wdata;
+    logic [DATA_WIDTH-1:0]          ld_a_rdata, ld_b_rdata, ld_c_rdata;
+
     axi_lite_slave #(
         .ADDR_WIDTH         (ADDR_WIDTH),
         .DATA_WIDTH         (DATA_WIDTH),
@@ -75,7 +79,22 @@ module matmul_top #(
         .base_addr_b   (base_addr_b),
         .base_addr_c   (base_addr_c),
         .status_busy   (status_busy),
-        .status_done   (status_done)
+        .status_done   (status_done),
+        .ld_a_en       (ld_a_en),
+        .ld_a_we       (ld_a_we),
+        .ld_a_addr     (ld_a_addr),
+        .ld_a_wdata    (ld_a_wdata),
+        .ld_a_rdata    (ld_a_rdata),
+        .ld_b_en       (ld_b_en),
+        .ld_b_we       (ld_b_we),
+        .ld_b_addr     (ld_b_addr),
+        .ld_b_wdata    (ld_b_wdata),
+        .ld_b_rdata    (ld_b_rdata),
+        .ld_c_en       (ld_c_en),
+        .ld_c_we       (ld_c_we),
+        .ld_c_addr     (ld_c_addr),
+        .ld_c_wdata    (ld_c_wdata),
+        .ld_c_rdata    (ld_c_rdata)
     );
 
     logic                           a_en, b_en, c_en, c_we;
@@ -109,19 +128,20 @@ module matmul_top #(
         .c_addr       (c_addr)
     );
 
-    // Scratchpad port A (word width DATA_WIDTH) faces the AXI-Lite side
-    // for pre-load/read-back; not yet wired -- axi_lite_slave doesn't
-    // drive scratchpad ports yet, so these are tied off for now.
+    // Scratchpad port A (word width DATA_WIDTH) faces the AXI-Lite side,
+    // driven by axi_lite_slave's SCRATCH_SEL/ADDR/WDATA/RDATA registers,
+    // for pre-load and read-back. Port B faces the MAC datapath via
+    // matmul_fsm.
     scratchpad_ram #(
         .DATA_WIDTH (DATA_WIDTH),
         .DEPTH      (SCRATCH_DEPTH)
     ) u_scratchpad_a (
         .clk     (clk),
-        .a_en    (1'b0),
-        .a_we    (1'b0),
-        .a_addr  ('0),
-        .a_wdata ('0),
-        .a_rdata (),
+        .a_en    (ld_a_en),
+        .a_we    (ld_a_we),
+        .a_addr  (ld_a_addr),
+        .a_wdata (ld_a_wdata),
+        .a_rdata (ld_a_rdata),
         .b_en    (a_en),
         .b_we    (1'b0),
         .b_addr  (a_addr),
@@ -134,11 +154,11 @@ module matmul_top #(
         .DEPTH      (SCRATCH_DEPTH)
     ) u_scratchpad_b (
         .clk     (clk),
-        .a_en    (1'b0),
-        .a_we    (1'b0),
-        .a_addr  ('0),
-        .a_wdata ('0),
-        .a_rdata (),
+        .a_en    (ld_b_en),
+        .a_we    (ld_b_we),
+        .a_addr  (ld_b_addr),
+        .a_wdata (ld_b_wdata),
+        .a_rdata (ld_b_rdata),
         .b_en    (b_en),
         .b_we    (1'b0),
         .b_addr  (b_addr),
@@ -151,11 +171,11 @@ module matmul_top #(
         .DEPTH      (SCRATCH_DEPTH)
     ) u_scratchpad_c (
         .clk     (clk),
-        .a_en    (1'b0),
-        .a_we    (1'b0),
-        .a_addr  ('0),
-        .a_wdata ('0),
-        .a_rdata (),
+        .a_en    (ld_c_en),
+        .a_we    (ld_c_we),
+        .a_addr  (ld_c_addr),
+        .a_wdata (ld_c_wdata),
+        .a_rdata (ld_c_rdata),
         .b_en    (c_en),
         .b_we    (c_we),
         .b_addr  (c_addr),
