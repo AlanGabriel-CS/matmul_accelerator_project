@@ -1,5 +1,7 @@
 # AXI-Lite Matrix Multiplier Accelerator
 
+[![Regression](https://github.com/AlanGabriel-CS/matmul_accelerator_project/actions/workflows/regression.yml/badge.svg)](https://github.com/AlanGabriel-CS/matmul_accelerator_project/actions/workflows/regression.yml)
+
 Third project in my hardware portfolio, after the RISC-V core and the [NoC router](https://github.com/AlanGabriel-CS/noc_router_project). I scaled this one down from a systolic array to a single-core MAC-based design on purpose — the goal here is clean AXI-Lite register-interface integration, memory addressing, and control FSM design, not spatial routing across a grid. It's scoped to a solid third-year computer engineering course level and built to run entirely in simulation (Icarus Verilog + cocotb) — no FPGA board or synthesis step.
 
 What I'm proudest of: `mac_unit` silently treated every matrix element as unsigned for most of this project's life, which means every product involving a negative operand would've been wrong — not a crash, just quietly incorrect output. A regression case built specifically to exercise negative values caught it before it ever shipped. More on that below.
