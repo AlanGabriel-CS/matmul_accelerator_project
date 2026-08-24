@@ -97,6 +97,10 @@ Every case above also checks `irq`: low before `START`, high the instant `DONE` 
 
 **Waveforms.** `WAVES=1 make` (cocotb's built-in Icarus support) dumps `dv/sim_build/matmul_top.fst`. Wired up and confirmed to produce a valid trace, but nothing's currently broken to chase down with it.
 
+**Regression, actually passing:**
+
+![5/5 cocotb tests passing](docs/regression-passing.png)
+
 ## Repository Structure
 
 ```
