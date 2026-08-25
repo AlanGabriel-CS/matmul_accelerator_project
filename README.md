@@ -105,6 +105,10 @@ Every case above also checks `irq`: low before `START`, high the instant `DONE` 
 
 **Waveforms.** `WAVES=1 make` (cocotb's built-in Icarus support) dumps `dv/sim_build/matmul_top.fst`. Wired up and confirmed to produce a valid trace, but nothing's currently broken to chase down with it.
 
+A directed 2x2 x 2x2 trace, showing the AXI-Lite scratchpad loads, the FSM's FETCH/ACCUM/WRITEBACK pulses, `mac_acc` actually computing 19, 22, 43, and 50 (exactly `A @ B` for the loaded matrices), and `irq` firing on completion:
+
+![Waveform trace of a 2x2 matmul: mac_acc computing 19, 22, 43, 50, irq firing on completion](docs/waveform.png)
+
 **Regression, actually passing:**
 
 ![5/5 cocotb tests passing](docs/regression-passing.png)
